@@ -14,34 +14,46 @@ export function Token() {
   const { user } = useAuth()
 
   const tokenomics = [
-    { label: 'Community Open Mint', percentage: 70, color: '#1BD6D1' },
-    { label: 'Future Developments', percentage: 5, color: '#06B6D4' },
-    { label: 'Airdrop for NFT Holders', percentage: 5, color: '#0891B2' },
-    { label: 'Giveaways & Marketing', percentage: 5, color: '#0E7490' },
-    { label: 'Exchange Listings, Dex & Pools', percentage: 5, color: '#164E63' },
-    { label: 'Team (In Future)', percentage: 5, color: '#164E63' },
-    { label: 'Dev Wallet', percentage: 5, color: '#164E63' },
+    { label: 'Premint', percentage: 70, color: '#1BD6D1' },
+    { label: 'Public Mint', percentage: 30, color: '#06B6D4' },
   ]
 
   const roadmapItems = [
-    { phase: 'Phase 1', title: 'NFT Mint', status: 'completed', description: 'Successful launch of $SHERK NFT collection with utility features' },
-    { phase: 'Phase 2', title: 'Bot Integration', status: 'completed', description: 'Telegram bot for community management and giveaway automation' },
-    { phase: 'Phase 3', title: 'NFT Staking', status: 'active', description: 'Launch staking platform with reward distribution system' },
-    { phase: 'Phase 4', title: 'Multi-chain', status: 'upcoming', description: 'Expand to multiple blockchain networks for broader accessibility' },
+    { phase: 'Phase 1', title: 'Token Launch', status: 'completed', description: 'SHERK token launch on BLOCKDAG (Kaspa) network with 999,999,999 total supply' },
+    { phase: 'Phase 2', title: 'NFT Collection', status: 'completed', description: '2222 SHERK NFTs with 4 rarity tiers and pickaxe staking mechanics' },
+    { phase: 'Phase 3', title: 'Staking Platform', status: 'active', description: 'Manual staking system with weekly rewards via kaspa.com airdrop' },
+    { phase: 'Phase 4', title: 'Strategic Partnerships', status: 'upcoming', description: 'Expand ecosystem partnerships and community growth initiatives' },
+    { phase: 'Phase 5', title: 'Charity Integration', status: 'upcoming', description: 'Direct integration with white tiger conservation initiatives' },
   ]
 
   const nftUtilities = [
     {
+      type: 'BOOM NFT',
+      slots: '4 Pickaxes',
+      multiplier: '6,248 SHERK/week',
+      description: 'Ultra rare NFTs with maximum earning potential',
+      rarity: '54 total'
+    },
+    {
+      type: 'Ultra Rare NFT',
+      slots: '3 Pickaxes',
+      multiplier: '4,686 SHERK/week',
+      description: 'High-value NFTs with excellent reward rates',
+      rarity: '333 total'
+    },
+    {
       type: 'Rare NFT',
-      slots: '2 Slots',
-      multiplier: '2x Rewards',
-      description: 'Maximum earning potential with premium staking slots'
+      slots: '2 Pickaxes',
+      multiplier: '3,124 SHERK/week',
+      description: 'Premium NFTs with strong earning potential',
+      rarity: '555 total'
     },
     {
       type: 'Common NFT',
-      slots: '0.5 Slot',
-      multiplier: '1x Rewards',
-      description: 'Entry-level staking with steady reward accumulation'
+      slots: '1 Pickaxe',
+      multiplier: '1,562 SHERK/week',
+      description: 'Entry-level NFTs with steady reward accumulation',
+      rarity: '1110 total'
     }
   ]
 

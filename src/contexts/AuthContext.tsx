@@ -38,6 +38,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUserProfile(null)
       }
       setLoading(false)
+      console.log('AuthContext: Auth state change complete, loading set to false')
     })
 
     return () => subscription.unsubscribe()
@@ -61,21 +62,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signIn = async (email: string, password: string) => {
     try {
+      console.log('AuthContext: Starting sign in...')
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       })
+      
+      console.log('AuthContext: Sign in result:', { data, error })
       
       if (!error && data.user) {
         // Manually set the user state to ensure immediate update
         setUser(data.user)
         // Fetch user profile
         await fetchUserProfile(data.user.id)
+        // Ensure loading is set to false
+        setLoading(false)
+        console.log('AuthContext: Sign in successful, loading set to false')
       }
       
       return { data, error }
     } catch (error) {
       console.error('Sign in error:', error)
+      setLoading(false)
       return { data: null, error }
     }
   }

@@ -29,13 +29,32 @@ export type User = {
   role: 'user' | 'admin'
 }
 
-export type MiningRig = {
+export type SherkStake = {
   id?: string
   user_id: string
   wallet_address: string
-  rig_name: string
-  rare_nfts: number
+  nickname: string
   common_nfts: number
-  telegram_id: string
+  rare_nfts: number
+  ultra_rare_nfts: number
+  boom_nfts: number
+  total_pickaxes: number
+  weekly_reward: number
+  status: 'active' | 'inactive' | 'pending'
+  last_reward_date?: string
+  total_rewards_earned: number
+  created_at?: string
+  updated_at?: string
+}
+
+export type SherkReward = {
+  id?: string
+  user_id: string
+  stake_id: string
+  week_number: number
+  reward_amount: number
+  pickaxes_count: number
+  payout_status: 'pending' | 'paid' | 'failed'
+  payout_date?: string
   created_at?: string
 }
