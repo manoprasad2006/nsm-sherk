@@ -1,8 +1,24 @@
 import { createClient } from '@supabase/supabase-js'
 
-// These will be set via environment variables in production
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'your-supabase-url'
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'your-supabase-anon-key'
+// Get environment variables with validation
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+
+// Validate that environment variables are set
+if (!supabaseUrl || !supabaseAnonKey) {
+  throw new Error(
+    'Missing Supabase environment variables. Please check your .env file and ensure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are set.'
+  )
+}
+
+// Validate URL format
+try {
+  new URL(supabaseUrl)
+} catch {
+  throw new Error(
+    'Invalid VITE_SUPABASE_URL format. Please ensure it follows the pattern: https://your-project.supabase.co'
+  )
+}
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
