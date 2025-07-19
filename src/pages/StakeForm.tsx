@@ -53,12 +53,41 @@ export function StakeForm() {
     e.preventDefault()
     if (!user) return
 
+    // Validate form data
+    if (!formData.walletAddress.trim()) {
+      toast.error('Please enter a valid wallet address')
+      return
+    }
+    
+    if (!formData.rigName.trim()) {
+      toast.error('Please enter a rig name')
+      return
+    }
+    
+    if (!formData.telegramId.trim()) {
+      toast.error('Please enter your Telegram username')
+      return
+    }
+    
+    if (formData.rareNfts === 0 && formData.commonNfts === 0) {
+      toast.error('Please enter at least one NFT (rare or common)')
+      return
+    }
+
     setLoading(true)
     console.log('Submitting staking form:', formData)
-    console.log('About to insert into Supabase')
+    console.log('User ID:', user.id)
+    console.log('About to insert into Supabase with data:', {
+      user_id: user.id,
+      wallet_address: formData.walletAddress,
+      rig_name: formData.rigName,
+      rare_nfts: formData.rareNfts,
+      common_nfts: formData.commonNfts,
+      telegram_id: formData.telegramId
+    })
 
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('mining_rigs')
         .insert({
           user_id: user.id,
@@ -68,18 +97,19 @@ export function StakeForm() {
           common_nfts: formData.commonNfts,
           telegram_id: formData.telegramId
         })
-      console.log('Insert finished', error)
+      
+      console.log('Insert finished. Data:', data, 'Error:', error)
 
       if (error) {
-        toast.error('Failed to save staking information')
+        toast.error(`Failed to save staking information: ${error.message}`)
         console.error('Supabase insert error:', error)
       } else {
         toast.success('Staking setup completed!')
         console.log('Staking setup successful, navigating to dashboard')
-        navigate('/dashboard')
+        setTimeout(() => navigate('/dashboard'), 1000)
       }
     } catch (error) {
-      toast.error('Failed to save staking information')
+      toast.error(`Unexpected error: ${error instanceof Error ? error.message : 'Unknown error'}`)
       console.error('Unexpected error:', error)
     } finally {
       setLoading(false)
@@ -268,7 +298,14 @@ export function StakeForm() {
                 className="w-full"
                 size="lg"
               >
-                {loading ? 'Setting up...' : 'Complete Staking Setup'}
+                {loading ? (
+                  <div className="flex items-center space-x-2">
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    <span>Setting up...</span>
+                  </div>
+                ) : (
+                  'Complete Staking Setup'
+                )}
               </GlowButton>
             </form>
           </motion.div>
