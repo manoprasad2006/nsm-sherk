@@ -19,7 +19,7 @@ export function Auth() {
   // Redirect if user is already authenticated
   useEffect(() => {
     if (user) {
-      navigate('/dashboard')
+      navigate('/stake-form')
     }
   }, [user, navigate])
 
@@ -39,7 +39,7 @@ export function Auth() {
         } else {
           toast.success('Welcome back!')
           setTimeout(() => {
-            navigate('/dashboard')
+            navigate('/stake-form')
           }, 100)
         }
       } else {
@@ -50,7 +50,7 @@ export function Auth() {
         } else {
           toast.success('Account created successfully!')
           setTimeout(() => {
-            navigate('/dashboard')
+            navigate('/stake-form')
           }, 100)
         }
       }

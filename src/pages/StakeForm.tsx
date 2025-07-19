@@ -7,7 +7,8 @@ import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { GlowButton } from '../components/UI/GlowButton'
 import { Modal } from '../components/UI/Modal'
-import { Pickaxe, Wallet, User, CheckCircle, AlertCircle } from 'lucide-react'
+import { Pickaxe, Wallet, User, CheckCircle, AlertCircle, Check } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 
 interface StakeData {
   nickname: string
@@ -20,6 +21,7 @@ interface StakeData {
 
 export function StakeForm() {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const [stakeData, setStakeData] = useState<StakeData>({
     nickname: '',
     wallet_address: '',
@@ -33,6 +35,7 @@ export function StakeForm() {
   const [modalMessage, setModalMessage] = useState('')
   const [modalType, setModalType] = useState<'success' | 'error'>('success')
   const [existingStake, setExistingStake] = useState<any>(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   useEffect(() => {
     if (user) {
@@ -44,27 +47,38 @@ export function StakeForm() {
     if (!user) return
     
     try {
-      const { data, error } = await supabase
-        .from('sherk_stakes')
-        .select('*')
-        .eq('user_id', user.id)
-        .single()
+      console.log('Fetching existing stake for user:', user.id)
+      
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/sherk_stakes?user_id=eq.${user.id}`, {
+        method: 'GET',
+        headers: {
+          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json'
+        }
+      })
 
-      if (error && error.code !== 'PGRST116') {
-        console.error('Error fetching stake:', error)
-        return
-      }
-
-      if (data) {
-        setExistingStake(data)
-        setStakeData({
-          nickname: data.nickname || '',
-          wallet_address: data.wallet_address || '',
-          common_nfts: data.common_nfts || 0,
-          rare_nfts: data.rare_nfts || 0,
-          ultra_rare_nfts: data.ultra_rare_nfts || 0,
-          boom_nfts: data.boom_nfts || 0
-        })
+      if (response.ok) {
+        const data = await response.json()
+        console.log('Existing stake fetch result:', data)
+        
+        if (data && data.length > 0) {
+          const stake = data[0]
+          setExistingStake(stake)
+          setStakeData({
+            nickname: stake.nickname || '',
+            wallet_address: stake.wallet_address || '',
+            common_nfts: stake.common_nfts || 0,
+            rare_nfts: stake.rare_nfts || 0,
+            ultra_rare_nfts: stake.ultra_rare_nfts || 0,
+            boom_nfts: stake.boom_nfts || 0
+          })
+          console.log('Existing stake loaded:', stake)
+        } else {
+          console.log('No existing stake found')
+        }
+      } else {
+        console.error('Error fetching existing stake:', response.status, response.statusText)
       }
     } catch (error) {
       console.error('Error fetching existing stake:', error)
@@ -84,153 +98,143 @@ export function StakeForm() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-
+    
+    console.log('=== STAKE FORM SUBMISSION DEBUG ===')
+    console.log('Form data:', stakeData)
+    console.log('User:', user)
+    
     if (!user) {
-      setModalMessage('User not authenticated')
+      console.log('ERROR: No user found')
+      setModalMessage('Please log in to create a stake')
       setModalType('error')
       setShowModal(true)
       return
     }
 
-    if (calculatePickaxes() === 0) {
-      setModalMessage('Please add at least one NFT to stake')
+    // Validate that at least one NFT is selected
+    const totalNfts = stakeData.common_nfts + stakeData.rare_nfts + stakeData.ultra_rare_nfts + stakeData.boom_nfts
+    console.log('Total NFTs:', totalNfts)
+    
+    if (totalNfts === 0) {
+      console.log('ERROR: No NFTs selected')
+      setModalMessage('Please select at least one NFT to stake. You cannot create an empty stake.')
       setModalType('error')
       setShowModal(true)
       return
     }
 
     setLoading(true)
-    console.log('Starting stake submission...', { user: user.id, stakeData })
+    setIsSubmitting(true)
+    console.log('Starting submission process...')
 
-    const stakeDataToSave = {
-      user_id: user.id,
-      nickname: stakeData.nickname.trim(),
-      wallet_address: stakeData.wallet_address.trim(),
-      common_nfts: stakeData.common_nfts,
-      rare_nfts: stakeData.rare_nfts,
-      ultra_rare_nfts: stakeData.ultra_rare_nfts,
-      boom_nfts: stakeData.boom_nfts,
-      status: 'active'
-    }
-
-    // Store in localStorage as backup
-    localStorage.setItem('pendingStakeData', JSON.stringify(stakeDataToSave))
-    
-    console.log('Attempting database insertion with data:', stakeDataToSave)
-
-    // Try multiple database insertion approaches
-    let success = false
-    let errorMessage = ''
-
-    // Approach 1: Direct insert
     try {
-      console.log('Trying direct insert...')
-      const insertResult = await supabase
-        .from('sherk_stakes')
-        .insert([stakeDataToSave])
-        .select()
-
-      console.log('Direct insert result:', insertResult)
-
-      if (insertResult.data && insertResult.data.length > 0) {
-        success = true
-        console.log('Direct insert successful!')
-      } else if (insertResult.error) {
-        errorMessage = `Direct insert failed: ${insertResult.error.message}`
-        console.error('Direct insert error:', insertResult.error)
+      const stakeDataToSubmit = {
+        user_id: user.id,
+        nickname: stakeData.nickname.trim() || 'Anonymous',
+        wallet_address: stakeData.wallet_address.trim() || 'kaspa:anonymous',
+        common_nfts: stakeData.common_nfts,
+        rare_nfts: stakeData.rare_nfts,
+        ultra_rare_nfts: stakeData.ultra_rare_nfts,
+        boom_nfts: stakeData.boom_nfts,
+        status: 'active',
+        updated_at: new Date().toISOString()
       }
+
+      console.log('Prepared data for submission:', stakeDataToSubmit)
+
+      // Use direct REST API with UPSERT instead of Supabase client
+      console.log('Using direct REST API with UPSERT...')
+      
+      const startTime = Date.now()
+      
+      // Try to update existing stake first, if it fails, create new one
+      let response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/sherk_stakes?user_id=eq.${user.id}`, {
+        method: 'PATCH',
+        headers: {
+          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation'
+        },
+        body: JSON.stringify(stakeDataToSubmit)
+      })
+      
+      console.log('PATCH response status:', response.status)
+      
+      // If update failed (no existing record), create new one
+      if (response.status === 404) {
+        console.log('No existing stake found, creating new one...')
+        response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/sherk_stakes`, {
+          method: 'POST',
+          headers: {
+            'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=representation'
+          },
+          body: JSON.stringify(stakeDataToSubmit)
+        })
+        console.log('POST response status:', response.status)
+      }
+      const endTime = Date.now()
+      
+      console.log(`REST API call completed in ${endTime - startTime}ms`)
+      console.log('Response status:', response.status)
+      console.log('Response ok:', response.ok)
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        throw new Error(`HTTP ${response.status}: ${errorText}`)
+      }
+
+      let result
+      try {
+        result = await response.json()
+        console.log('REST API response:', result)
+      } catch (error) {
+        console.log('No JSON response (this is normal for PATCH requests)')
+        result = null
+      }
+
+      // For PATCH requests (updates), we don't always get data back, but that's OK
+      // For POST requests (creates), we should get the created data
+      if (response.ok) {
+        console.log('SUCCESS! Stake operation completed')
+        
+        if (result && result.length > 0) {
+          console.log('Stake data returned:', result[0])
+        } else {
+          console.log('No data returned (normal for updates)')
+        }
+        
+        setModalMessage('🎉 Stake updated successfully! Redirecting to dashboard...')
+        setModalType('success')
+        setShowModal(true)
+        
+        // Clear any old cached data
+        localStorage.removeItem(`sherk_stake_${user.id}`)
+        
+        setTimeout(() => {
+          navigate('/dashboard')
+        }, 1500)
+        return
+      } else {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+      }
+
     } catch (error) {
-      errorMessage = `Direct insert error: ${error instanceof Error ? error.message : 'Unknown error'}`
-      console.error('Direct insert exception:', error)
-    }
-
-    // Approach 2: Upsert if direct insert failed
-    if (!success) {
-      try {
-        console.log('Trying upsert approach...')
-        const upsertResult = await supabase
-          .from('sherk_stakes')
-          .upsert([stakeDataToSave], {
-            onConflict: 'user_id'
-          })
-          .select()
-
-        console.log('Upsert result:', upsertResult)
-
-        if (upsertResult.data && upsertResult.data.length > 0) {
-          success = true
-          console.log('Upsert successful!')
-        } else if (upsertResult.error) {
-          errorMessage = `Upsert failed: ${upsertResult.error.message}`
-          console.error('Upsert error:', upsertResult.error)
-        }
-      } catch (error) {
-        errorMessage = `Upsert error: ${error instanceof Error ? error.message : 'Unknown error'}`
-        console.error('Upsert exception:', error)
-      }
-    }
-
-    // Approach 3: Delete then insert if upsert failed
-    if (!success) {
-      try {
-        console.log('Trying delete then insert approach...')
-        
-        // First delete any existing stake
-        const deleteResult = await supabase
-          .from('sherk_stakes')
-          .delete()
-          .eq('user_id', user.id)
-        
-        console.log('Delete result:', deleteResult)
-        
-        // Then insert new stake
-        const insertResult = await supabase
-          .from('sherk_stakes')
-          .insert([stakeDataToSave])
-          .select()
-
-        console.log('Delete-then-insert result:', insertResult)
-
-        if (insertResult.data && insertResult.data.length > 0) {
-          success = true
-          console.log('Delete-then-insert successful!')
-        } else if (insertResult.error) {
-          errorMessage = `Delete-then-insert failed: ${insertResult.error.message}`
-          console.error('Delete-then-insert error:', insertResult.error)
-        }
-      } catch (error) {
-        errorMessage = `Delete-then-insert error: ${error instanceof Error ? error.message : 'Unknown error'}`
-        console.error('Delete-then-insert exception:', error)
-      }
-    }
-
-    setLoading(false)
-
-    if (success) {
-      // Clear stored data since we succeeded
-      localStorage.removeItem('pendingStakeData')
+      console.error('REST API submission failed:', error)
       
-      setModalMessage('🎉 Your stake has been successfully saved to the database! The admin can now see your stake. Redirecting to dashboard...')
-      setModalType('success')
-      setShowModal(true)
-      
-      // Update local state
-      setExistingStake(stakeDataToSave)
-      
-      // Redirect to dashboard after 2 seconds
-      setTimeout(() => {
-        window.location.href = '/dashboard'
-      }, 2000)
-    } else {
-      setModalMessage(`Database insertion failed after trying multiple approaches. 
+      setModalMessage(`Stake creation failed. Please try again or contact support.
 
-Error: ${errorMessage}
-
-Your data has been saved locally. Please try the manual backup button below, or contact support with this data:
-
-${JSON.stringify(stakeDataToSave, null, 2)}`)
+Error: ${error instanceof Error ? error.message : 'Unknown error'}`)
       setModalType('error')
       setShowModal(true)
+      
+    } finally {
+      console.log('Submission process completed')
+      setLoading(false)
+      setIsSubmitting(false)
     }
   }
 
@@ -257,7 +261,7 @@ ${JSON.stringify(stakeDataToSave, null, 2)}`)
           <div className="text-center">
             <h2 className="text-2xl font-bold text-white mb-4">Authentication Required</h2>
             <p className="text-gray-400 mb-6">Please log in to access the staking form</p>
-            <GlowButton onClick={() => window.location.href = '/auth'}>
+            <GlowButton onClick={() => navigate('/auth')}>
               Go to Login
             </GlowButton>
           </div>
@@ -381,112 +385,142 @@ ${JSON.stringify(stakeDataToSave, null, 2)}`)
                 </div>
               </div>
 
-              {/* Submit Button */}
-              <div className="text-center">
-                <button 
-                  type="submit"
-                  disabled={loading}
-                  className="min-w-[200px] bg-primary-500 hover:bg-primary-600 text-white font-medium py-3 px-6 rounded-lg transition-colors glow-on-hover disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {loading ? (
-                    <div className="flex items-center">
-                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>
-                      {existingStake ? 'Updating...' : 'Creating...'}
-                    </div>
-                  ) : (
-                    <div className="flex items-center">
-                      <CheckCircle className="h-5 w-5 mr-2" />
-                      {existingStake ? 'Update Stake' : 'Create Stake'}
-                    </div>
-                  )}
-                </button>
-                
-                {/* Backup Manual Creation */}
-                <div className="mt-6 p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
-                  <h4 className="text-yellow-400 font-semibold mb-2">Backup: Manual Stake Creation</h4>
-                  <p className="text-yellow-300 text-sm mb-3">
-                    If the form above doesn't work, use this button to create a test stake with your current form data.
-                  </p>
-                  <GlowButton 
-                    onClick={async () => {
-                      try {
-                        // Get stored data or use current form data
-                        const storedData = localStorage.getItem('pendingStakeData')
-                        const dataToUse = storedData ? JSON.parse(storedData) : {
-                          user_id: user.id,
-                          nickname: stakeData.nickname.trim() || 'Manual Test',
-                          wallet_address: stakeData.wallet_address.trim() || 'kaspa:manual-test',
-                          common_nfts: stakeData.common_nfts,
-                          rare_nfts: stakeData.rare_nfts,
-                          ultra_rare_nfts: stakeData.ultra_rare_nfts,
-                          boom_nfts: stakeData.boom_nfts,
-                          status: 'active'
-                        }
-                        
-                        console.log('Manual stake creation with data:', dataToUse)
-                        
-                        // Try multiple approaches
-                        let result = null
-                        let error = null
-                        
-                        // Approach 1: Direct insert
-                        try {
-                          result = await supabase
-                            .from('sherk_stakes')
-                            .insert([dataToUse])
-                            .select()
-                          console.log('Direct insert result:', result)
-                        } catch (e) {
-                          console.log('Direct insert failed, trying upsert...')
-                          error = e
-                        }
-                        
-                        // Approach 2: Upsert if insert failed
-                        if (!result || result.error) {
-                          try {
-                            result = await supabase
-                              .from('sherk_stakes')
-                              .upsert([dataToUse], {
-                                onConflict: 'user_id'
-                              })
-                              .select()
-                            console.log('Upsert result:', result)
-                          } catch (e) {
-                            console.log('Upsert also failed:', e)
-                            error = e
-                          }
-                        }
-                        
-                        if (result && !result.error) {
-                          // Clear stored data
-                          localStorage.removeItem('pendingStakeData')
-                          
-                          setModalMessage('Manual stake created successfully! Redirecting to dashboard...')
-                          setModalType('success')
-                          setShowModal(true)
-                          setTimeout(() => {
-                            window.location.href = '/dashboard'
-                          }, 2000)
-                        } else {
-                          const errorMsg = error && typeof error === 'object' && 'message' in error 
-                            ? (error as any).message 
-                            : result?.error?.message || 'Unknown error'
-                          setModalMessage(`Manual creation failed. Error: ${errorMsg}. Try the dashboard manual creation instead.`)
-                          setModalType('error')
-                          setShowModal(true)
-                        }
-                      } catch (error) {
-                        setModalMessage(`Manual creation error: ${error instanceof Error ? error.message : 'Unknown error'}`)
-                        setModalType('error')
-                        setShowModal(true)
-                      }
-                    }}
-                    variant="outline"
-                    className="w-full"
+                              {/* Submit Button */}
+                <div className="text-center">
+                  <button 
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="w-full min-w-[200px] bg-primary-500 hover:bg-primary-600 text-white font-medium py-3 px-6 rounded-lg transition-colors glow-on-hover disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    Create Stake Manually (Backup)
-                  </GlowButton>
-                </div>
+                    {isSubmitting ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                        Creating...
+                      </>
+                    ) : (
+                      <>
+                        <Check className="h-4 w-4 mr-2" />
+                        Create Stake
+                      </>
+                    )}
+                  </button>
+                
+                                  {/* Professional retry option */}
+                  <div className="mt-4 p-4 bg-blue-500/10 rounded-lg border border-blue-500/30">
+                    <p className="text-sm text-blue-300 mb-2">
+                      Need help? Our support team is here to assist you.
+                    </p>
+                    <GlowButton 
+                      onClick={() => {
+                        setModalMessage('For immediate assistance, please contact our support team at support@nsm.com or join our Discord community.')
+                        setModalType('success')
+                        setShowModal(true)
+                      }}
+                      variant="outline"
+                      size="sm"
+                      className="w-full"
+                    >
+                      Contact Support
+                    </GlowButton>
+                  </div>
+                  
+                  {/* Network Test Button */}
+                  <div className="mt-4 p-4 bg-red-500/10 rounded-lg border border-red-500/30">
+                    <p className="text-sm text-red-300 mb-2">
+                      Debug: Test Supabase Connection
+                    </p>
+                    <GlowButton 
+                      onClick={async () => {
+                        try {
+                          console.log('=== NETWORK DIAGNOSTIC TEST ===')
+                          console.log('Supabase URL:', import.meta.env.VITE_SUPABASE_URL)
+                          console.log('User ID:', user?.id)
+                          
+                          // Test 1: Direct fetch to Supabase REST API
+                          console.log('Test 1: Direct REST API call...')
+                          const startTime = Date.now()
+                          const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/sherk_stakes?select=count`, {
+                            method: 'GET',
+                            headers: {
+                              'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+                              'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+                              'Content-Type': 'application/json'
+                            }
+                          })
+                          const endTime = Date.now()
+                          
+                          console.log(`Test 1 completed in ${endTime - startTime}ms`)
+                          console.log('Response status:', response.status)
+                          console.log('Response ok:', response.ok)
+                          
+                          if (response.ok) {
+                            const data = await response.json()
+                            console.log('Test 1 data:', data)
+                          } else {
+                            console.log('Test 1 failed:', response.statusText)
+                          }
+                          
+                          // Test 2: Direct insert via REST API
+                          console.log('Test 2: Direct REST API insert...')
+                          const insertResponse = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/sherk_stakes`, {
+                            method: 'POST',
+                            headers: {
+                              'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+                              'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+                              'Content-Type': 'application/json',
+                              'Prefer': 'return=representation'
+                            },
+                            body: JSON.stringify({
+                              user_id: user?.id,
+                              nickname: 'NETWORK_TEST',
+                              wallet_address: 'kaspa:test',
+                              common_nfts: 1,
+                              rare_nfts: 0,
+                              ultra_rare_nfts: 0,
+                              boom_nfts: 0,
+                              status: 'active'
+                            })
+                          })
+                          
+                          console.log('Test 2 status:', insertResponse.status)
+                          console.log('Test 2 ok:', insertResponse.ok)
+                          
+                          if (insertResponse.ok) {
+                            const insertData = await insertResponse.json()
+                            console.log('Test 2 success:', insertData)
+                            
+                            // Clean up test data
+                            await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/sherk_stakes?nickname=eq.NETWORK_TEST`, {
+                              method: 'DELETE',
+                              headers: {
+                                'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+                                'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+                              }
+                            })
+                          } else {
+                            const errorText = await insertResponse.text()
+                            console.log('Test 2 failed:', errorText)
+                          }
+                          
+                          alert(`Network Test Results:
+
+Test 1 (REST API): ${response.ok ? 'PASSED' : 'FAILED'} (${response.status})
+Test 2 (Direct Insert): ${insertResponse.ok ? 'PASSED' : 'FAILED'} (${insertResponse.status})
+
+Check console for detailed logs.`)
+                          
+                        } catch (error) {
+                          console.error('Network test failed:', error)
+                          alert(`Network test failed: ${error}`)
+                        }
+                      }}
+                      variant="outline"
+                      size="sm"
+                      className="w-full"
+                    >
+                      Test Network Connection
+                    </GlowButton>
+                  </div>
               </div>
             </form>
           </motion.div>

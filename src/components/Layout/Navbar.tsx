@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { Menu, X, Zap } from 'lucide-react'
 import { useAuth } from '../../contexts/AuthContext'
+import toast, { Toaster } from 'react-hot-toast'
 
 interface NavbarProps {
   variant?: 'giveaways' | 'token'
@@ -14,6 +15,7 @@ export function Navbar({ variant = 'giveaways' }: NavbarProps) {
   const location = useLocation()
   const navigate = useNavigate()
   const { user, userProfile, signOut } = useAuth()
+  const [signingOut, setSigningOut] = useState(false)
 
   useEffect(() => {
     const handleScroll = () => {
@@ -62,6 +64,23 @@ export function Navbar({ variant = 'giveaways' }: NavbarProps) {
     }
   }
 
+  // Handle sign out
+  const handleSignOut = async () => {
+    if (signingOut) return // Prevent multiple clicks
+    
+    setSigningOut(true)
+    try {
+      await signOut()
+      toast.success('Signed out successfully')
+      navigate('/')
+    } catch (error) {
+      console.error('Sign out error:', error)
+      toast.error('Failed to sign out. Please try again.')
+    } finally {
+      setSigningOut(false)
+    }
+  }
+
   return (
     <motion.nav
       initial={{ y: -100 }}
@@ -72,6 +91,7 @@ export function Navbar({ variant = 'giveaways' }: NavbarProps) {
           : 'bg-transparent'
       }`}
     >
+      <Toaster position="top-center" />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           {/* Logo */}
@@ -128,10 +148,11 @@ export function Navbar({ variant = 'giveaways' }: NavbarProps) {
               <div className="flex items-center space-x-4">
                 <span className="text-sm text-gray-400">{user.email}</span>
                 <button
-                  onClick={signOut}
-                  className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg text-white text-sm transition-colors"
+                  onClick={handleSignOut}
+                  disabled={signingOut}
+                  className="bg-red-600 hover:bg-red-700 disabled:bg-red-800 disabled:cursor-not-allowed px-4 py-2 rounded-lg text-white text-sm transition-colors"
                 >
-                  Sign Out
+                  {signingOut ? 'Signing Out...' : 'Sign Out'}
                 </button>
               </div>
             ) : (
@@ -176,12 +197,13 @@ export function Navbar({ variant = 'giveaways' }: NavbarProps) {
             {user ? (
               <button
                 onClick={() => {
-                  signOut()
+                  handleSignOut()
                   setIsOpen(false)
                 }}
-                className="block w-full text-left py-2 text-red-400 hover:text-red-300 transition-colors"
+                disabled={signingOut}
+                className="block w-full text-left py-2 text-red-400 hover:text-red-300 disabled:text-red-600 disabled:cursor-not-allowed transition-colors"
               >
-                Sign Out
+                {signingOut ? 'Signing Out...' : 'Sign Out'}
               </button>
             ) : (
               <Link

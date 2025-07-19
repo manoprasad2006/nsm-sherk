@@ -56,10 +56,10 @@ export function HeroSection({ user }: HeroSectionProps) {
               View Tokenomics
             </GlowButton>
             {user ? (
-              <Link to="/dashboard">
+              <Link to="/stake-form">
                 <GlowButton size="lg" variant="outline">
                   <LinkIcon className="h-6 w-6" />
-                  Go to Dashboard
+                  Start Staking
                 </GlowButton>
               </Link>
             ) : (
