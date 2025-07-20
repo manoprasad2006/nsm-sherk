@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { Pickaxe, Wallet, TrendingUp, Clock, Award, RefreshCw, User } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
@@ -29,9 +29,24 @@ interface SherkStake {
 export function Dashboard() {
   const { user, loading } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
   const [sherkStake, setSherkStake] = useState<SherkStake | null>(null)
   const [stakeLoading, setStakeLoading] = useState(true)
   const [authTimeout, setAuthTimeout] = useState(false)
+  const [renderCount, setRenderCount] = useState(0)
+  const [accessToken, setAccessToken] = useState<string | null>(null)
+
+  useEffect(() => {
+    // Get the current session's access token
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setAccessToken(session?.access_token || null)
+    })
+  }, [user])
+
+  // Debug render count (only log on mount and when key values change)
+  useEffect(() => {
+    console.log(`Dashboard render - user:`, user?.email, 'loading:', loading, 'stakeLoading:', stakeLoading)
+  }, [user?.email, loading, stakeLoading])
 
   console.log('Dashboard render - user:', user?.email, 'loading:', loading, 'stakeLoading:', stakeLoading, 'authTimeout:', authTimeout)
 
@@ -40,54 +55,89 @@ export function Dashboard() {
     
     if (user && !loading) {
       console.log('User found and ready to fetch stake')
-      fetchSherkStake()
+      // Add a small delay to ensure database consistency after form submission
+      const timer = setTimeout(() => {
+        fetchSherkStake()
+      }, 500) // Reduced from 1000ms to 500ms
+      
+      return () => clearTimeout(timer)
     }
-  }, [user, loading, navigate])
+  }, [user, loading])
 
-  // Add timeout to prevent infinite loading
+  // Add timeout to prevent infinite loading - only if no user and still loading
   useEffect(() => {
     const timeout = setTimeout(() => {
-      if (loading) {
+      if (loading && !user) {
         console.log('Auth loading timeout - forcing redirect to auth')
         setAuthTimeout(true)
         navigate('/auth')
       }
-    }, 5000) // 5 second timeout
+    }, 5000) // Reduced from 10000ms to 5000ms
 
     return () => clearTimeout(timeout)
-  }, [loading, navigate])
+  }, [loading, user])
+  
+  // Add a timeout to prevent infinite stake loading
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      if (stakeLoading && user && !loading) {
+        console.log('Stake loading timeout - forcing stakeLoading to false')
+        setStakeLoading(false)
+      }
+    }, 10000) // Reduced timeout to 10 seconds
+
+    return () => clearTimeout(timeout)
+  }, [stakeLoading, user, loading])
 
   // Show loading while authentication is being determined
-  if (loading) {
+  if (loading && !user) {
     return (
       <div className="min-h-screen bg-dark-900 flex items-center justify-center">
         <div className="text-center">
           <div className="w-16 h-16 border-4 border-primary-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
           <p className="text-white">Loading dashboard...</p>
           <p className="text-gray-400 text-sm mt-2">Please wait while we verify your authentication...</p>
+          <button 
+            onClick={() => window.location.reload()}
+            className="mt-4 px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors"
+          >
+            Refresh Page
+          </button>
         </div>
       </div>
     )
   }
 
-  // Redirect if no user
-  if (!user) {
+  // Redirect if no user and not loading
+  if (!user && !loading) {
     navigate('/auth')
     return null
   }
 
-  const fetchSherkStake = async () => {
+  const fetchSherkStake = async (retryCount = 0) => {
     if (!user) {
       console.log('fetchSherkStake: No user, returning early')
       return
     }
 
-    console.log('fetchSherkStake called with user:', user.id, 'email:', user.email)
+    const headers = {
+      'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+      'Authorization': `Bearer ${accessToken || import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+      'Content-Type': 'application/json'
+    };
+
+    console.log(`fetchSherkStake called with user: ${user.id}, email: ${user.email}, retry: ${retryCount}`)
     
     // Clear any cached data first
     localStorage.removeItem(`sherk_stake_${user.id}`)
     
     setStakeLoading(true)
+    
+    // Add a timeout for stake loading
+    const loadingTimeout = setTimeout(() => {
+      console.log('Stake loading timeout - setting loading to false')
+      setStakeLoading(false)
+    }, 10000) // Reduced timeout to 10 seconds
     
     try {
       console.log('Fetching fresh data from database...')
@@ -96,11 +146,7 @@ export function Dashboard() {
       // Use direct REST API instead of Supabase client
       const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/sherk_stakes?user_id=eq.${user.id}`, {
         method: 'GET',
-        headers: {
-          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-          'Content-Type': 'application/json'
-        }
+        headers
       })
       
       console.log('Dashboard fetch response status:', response.status)
@@ -109,6 +155,14 @@ export function Dashboard() {
       if (!response.ok) {
         const errorText = await response.text()
         console.error('Dashboard fetch error response:', errorText)
+        
+        // If it's a 401 or 403, the user might need to re-authenticate
+        if (response.status === 401 || response.status === 403) {
+          console.log('Authentication error, redirecting to auth')
+          navigate('/auth')
+          return
+        }
+        
         throw new Error(`HTTP ${response.status}: ${response.statusText}`)
       }
       
@@ -119,16 +173,43 @@ export function Dashboard() {
       if (data && data.length > 0) {
         console.log('Stake found:', data[0])
         setSherkStake(data[0])
+        // Clear the fromStakeForm state since we found the stake
+        if (location.state?.fromStakeForm) {
+          navigate(location.pathname, { replace: true, state: {} })
+        }
+        // Clear any cached data to ensure fresh data
+        localStorage.removeItem(`sherk_stake_${user.id}`)
       } else {
         console.log('No stake found for user - data is empty or null')
+        
+        // If this is the first attempt and user just came from stake form, retry multiple times
+        if (retryCount < 3 && location.state?.fromStakeForm) {
+          console.log(`User just submitted stake form, retrying fetch in ${(retryCount + 1) * 1} seconds... (attempt ${retryCount + 1}/3)`)
+          setTimeout(() => {
+            fetchSherkStake(retryCount + 1)
+          }, (retryCount + 1) * 1000) // Reduced from 2000ms to 1000ms
+          return
+        }
+        
         setSherkStake(null)
       }
       
     } catch (error) {
       console.error('Error fetching stake:', error)
+      
+      // If this is the first attempt and user just came from stake form, retry once
+      if (retryCount === 0 && location.state?.fromStakeForm) {
+        console.log('Error occurred, retrying fetch in 3 seconds...')
+        setTimeout(() => {
+          fetchSherkStake(retryCount + 1)
+        }, 3000)
+        return
+      }
+      
       setSherkStake(null)
     } finally {
       console.log('Setting stakeLoading to false')
+      clearTimeout(loadingTimeout)
       setStakeLoading(false)
     }
   }
@@ -163,7 +244,7 @@ export function Dashboard() {
 
   const refreshData = async () => {
     toast('Refreshing staking data...', { icon: '🔄' })
-    await fetchSherkStake()
+    await fetchSherkStake(0)
     toast.success('Data refreshed!')
   }
 
@@ -176,46 +257,97 @@ export function Dashboard() {
         <div className="flex items-center justify-center min-h-screen">
           <div className="text-center">
             <h2 className="text-2xl font-bold text-white mb-4">Welcome to SHERK Staking</h2>
-            <p className="text-gray-400 mb-6">Loading your staking data...</p>
+            <p className="text-gray-400 mb-6">
+              {location.state?.fromStakeForm ? 'Processing your stake submission...' : 'Loading your staking data...'}
+            </p>
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500 mx-auto"></div>
+            {location.state?.fromStakeForm && (
+              <p className="text-gray-500 text-sm mt-4">This may take a few moments...</p>
+            )}
           </div>
         </div>
       </div>
     )
   }
 
-  // If no stake found, show debug info instead of redirecting
-  if (!sherkStake) {
-    console.log('No stake found, showing debug info')
+  // If no stake found, show a more user-friendly message with options
+  if (!sherkStake && !stakeLoading) {
+    console.log('No stake found, showing user-friendly message')
+    
+    // Check if user just came from stake form submission
+    const justSubmitted = location.state?.fromStakeForm || false
+    
+    // Don't show the "no stake" message if we're still in the initial loading phase
+    if (justSubmitted && Date.now() - (location.state?.timestamp || 0) < 10000) {
+      return (
+        <div className="min-h-screen bg-dark-900">
+          <ParticleBackground />
+          <Navbar variant="token" />
+          <div className="flex items-center justify-center min-h-screen">
+            <div className="text-center">
+              <h2 className="text-2xl font-bold text-white mb-4">Welcome to SHERK Staking</h2>
+              <p className="text-gray-400 mb-6">Processing your stake submission...</p>
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500 mx-auto"></div>
+            </div>
+          </div>
+        </div>
+      )
+    }
+    
+    // If user just submitted, show a different message
+    if (justSubmitted) {
+      return (
+        <div className="min-h-screen bg-dark-900">
+          <ParticleBackground />
+          <Navbar variant="token" />
+          <div className="flex items-center justify-center min-h-screen">
+            <div className="text-center max-w-2xl">
+              <h2 className="text-2xl font-bold text-white mb-4">Welcome to SHERK Staking</h2>
+              <p className="text-gray-400 mb-6">
+                Your stake has been submitted! It may take a moment to appear. Please refresh or wait a moment.
+              </p>
+              <div className="space-x-4">
+                <button 
+                  onClick={() => fetchSherkStake(0)}
+                  className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+                >
+                  Refresh Data
+                </button>
+                <button 
+                  onClick={() => navigate('/stake-form')}
+                  className="px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors"
+                >
+                  Create Stake
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )
+    }
+    
     return (
       <div className="min-h-screen bg-dark-900">
         <ParticleBackground />
         <Navbar variant="token" />
         <div className="flex items-center justify-center min-h-screen">
           <div className="text-center max-w-2xl">
-            <h2 className="text-2xl font-bold text-white mb-4">No Stake Found</h2>
-            <div className="bg-dark-800/50 p-6 rounded-lg mb-6 text-left">
-              <h3 className="text-lg font-semibold text-white mb-4">Debug Information:</h3>
-              <div className="space-y-2 text-sm">
-                <div><strong>User ID:</strong> {user?.id}</div>
-                <div><strong>User Email:</strong> {user?.email}</div>
-                <div><strong>Loading State:</strong> {loading ? 'true' : 'false'}</div>
-                <div><strong>Stake Loading:</strong> {stakeLoading ? 'true' : 'false'}</div>
-                <div><strong>Stake Data:</strong> {sherkStake ? 'Found' : 'Not Found'}</div>
-              </div>
-            </div>
+            <h2 className="text-2xl font-bold text-white mb-4">Welcome to SHERK Staking</h2>
+            <p className="text-gray-400 mb-6">
+              You haven't created a stake yet. Start staking your SHERK NFTs to earn weekly rewards!
+            </p>
             <div className="space-x-4">
               <button 
-                onClick={() => fetchSherkStake()}
+                onClick={() => fetchSherkStake(0)}
                 className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
               >
-                Retry Fetch
+                Refresh Data
               </button>
               <button 
                 onClick={() => navigate('/stake-form')}
                 className="px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors"
               >
-                Go to Stake Form
+                Update Form
               </button>
             </div>
           </div>
@@ -231,7 +363,7 @@ export function Dashboard() {
       <ParticleBackground />
       <Navbar variant="token" />
       <Toaster position="top-center" />
-      <DebugAuth />
+      {/* <DebugAuth /> */}
 
       <div className="pt-24 pb-16">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -255,7 +387,7 @@ export function Dashboard() {
                   Refresh Data
                 </GlowButton>
                 <GlowButton onClick={() => navigate('/stake-form')} variant="outline" size="sm">
-                  Go to Stake Form
+                  Update Form
                 </GlowButton>
               </div>
             </div>
@@ -523,8 +655,8 @@ export function Dashboard() {
                       View Token Info
                     </GlowButton>
                     
-                    {/* Temporary manual stake creation */}
-                    <div className="mt-6 p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
+                    {/* Temporary manual stake creation - HIDDEN */}
+                    {/* <div className="mt-6 p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
                       <h4 className="text-yellow-400 font-semibold mb-2">Manual Stake Creation (Debug)</h4>
                       <p className="text-yellow-300 text-sm mb-3">
                         If the form isn't working, use this to create a test stake manually.
@@ -561,10 +693,10 @@ export function Dashboard() {
                       >
                         Create Test Stake
                       </GlowButton>
-                    </div>
+                    </div> */}
                     
-                    {/* Debug Section */}
-                    <div className="mt-6 p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+                    {/* Debug Section - HIDDEN */}
+                    {/* <div className="mt-6 p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg">
                       <h4 className="text-blue-400 font-semibold mb-2">Debug Information</h4>
                       <div className="text-blue-300 text-sm space-y-2">
                         <p>User ID: {user.id}</p>
@@ -611,7 +743,7 @@ export function Dashboard() {
                       >
                         Simple Database Test
                       </GlowButton>
-                    </div>
+                    </div> */}
                   </div>
                 </div>
               </div>

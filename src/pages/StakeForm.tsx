@@ -22,6 +22,7 @@ interface StakeData {
 export function StakeForm() {
   const { user } = useAuth()
   const navigate = useNavigate()
+  const [accessToken, setAccessToken] = useState<string | null>(null)
   const [stakeData, setStakeData] = useState<StakeData>({
     nickname: '',
     wallet_address: '',
@@ -38,6 +39,13 @@ export function StakeForm() {
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   useEffect(() => {
+    // Get the current session's access token
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setAccessToken(session?.access_token || null)
+    })
+  }, [user])
+
+  useEffect(() => {
     if (user) {
       fetchExistingStake()
     }
@@ -46,16 +54,19 @@ export function StakeForm() {
   const fetchExistingStake = async () => {
     if (!user) return
     
+    console.log('Fetching existing stake for user:', user.id, 'accessToken available:', !!accessToken)
+    
+    const headers = {
+      'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+      'Authorization': `Bearer ${accessToken || import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+      'Content-Type': 'application/json'
+    };
     try {
       console.log('Fetching existing stake for user:', user.id)
       
       const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/sherk_stakes?user_id=eq.${user.id}`, {
         method: 'GET',
-        headers: {
-          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-          'Content-Type': 'application/json'
-        }
+        headers
       })
 
       if (response.ok) {
@@ -79,11 +90,50 @@ export function StakeForm() {
         }
       } else {
         console.error('Error fetching existing stake:', response.status, response.statusText)
+        
+        // Fallback: Try using Supabase client
+        console.log('Trying fallback with Supabase client...')
+        try {
+          const { data: supabaseData, error } = await supabase
+            .from('sherk_stakes')
+            .select('*')
+            .eq('user_id', user.id)
+            .single()
+          
+          if (!error && supabaseData) {
+            console.log('Fallback successful, existing stake found:', supabaseData)
+            setExistingStake(supabaseData)
+            setStakeData({
+              nickname: supabaseData.nickname || '',
+              wallet_address: supabaseData.wallet_address || '',
+              common_nfts: supabaseData.common_nfts || 0,
+              rare_nfts: supabaseData.rare_nfts || 0,
+              ultra_rare_nfts: supabaseData.ultra_rare_nfts || 0,
+              boom_nfts: supabaseData.boom_nfts || 0
+            })
+          } else {
+            console.log('No existing stake found via fallback')
+          }
+        } catch (fallbackError) {
+          console.error('Fallback also failed:', fallbackError)
+        }
       }
     } catch (error) {
       console.error('Error fetching existing stake:', error)
     }
   }
+
+  // Check if user has existing stake to determine if fields should be read-only
+  const hasExistingStake = existingStake !== null
+  
+  // Debug logging
+  console.log('StakeForm Debug:', {
+    user: user?.email,
+    accessToken: !!accessToken,
+    existingStake: existingStake,
+    hasExistingStake: hasExistingStake,
+    stakeData: stakeData
+  })
 
   const calculatePickaxes = () => {
     return stakeData.common_nfts * 1 + 
@@ -102,6 +152,7 @@ export function StakeForm() {
     console.log('=== STAKE FORM SUBMISSION DEBUG ===')
     console.log('Form data:', stakeData)
     console.log('User:', user)
+    console.log('Access token available:', !!accessToken)
     
     if (!user) {
       console.log('ERROR: No user found')
@@ -147,43 +198,47 @@ export function StakeForm() {
       
       const startTime = Date.now()
       
-      // Try to update existing stake first, if it fails, create new one
-      let response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/sherk_stakes?user_id=eq.${user.id}`, {
-        method: 'PATCH',
+      // Always try POST first for new accounts
+      console.log('Attempting POST for new stake...')
+      let response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/sherk_stakes`, {
+        method: 'POST',
         headers: {
           'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          'Authorization': `Bearer ${accessToken || import.meta.env.VITE_SUPABASE_ANON_KEY}`,
           'Content-Type': 'application/json',
           'Prefer': 'return=representation'
         },
         body: JSON.stringify(stakeDataToSubmit)
       })
       
-      console.log('PATCH response status:', response.status)
+      console.log('POST response status:', response.status)
+      console.log('POST response ok:', response.ok)
       
-      // If update failed (no existing record), create new one
-      if (response.status === 404) {
-        console.log('No existing stake found, creating new one...')
-        response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/sherk_stakes`, {
-          method: 'POST',
+      // If POST fails with conflict (user already has stake), try PATCH
+      if (response.status === 409) {
+        console.log('User already has stake, attempting PATCH...')
+        response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/sherk_stakes?user_id=eq.${user.id}`, {
+          method: 'PATCH',
           headers: {
             'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+            'Authorization': `Bearer ${accessToken || import.meta.env.VITE_SUPABASE_ANON_KEY}`,
             'Content-Type': 'application/json',
             'Prefer': 'return=representation'
           },
           body: JSON.stringify(stakeDataToSubmit)
         })
-        console.log('POST response status:', response.status)
+        console.log('PATCH response status:', response.status)
       }
+      
       const endTime = Date.now()
       
       console.log(`REST API call completed in ${endTime - startTime}ms`)
-      console.log('Response status:', response.status)
-      console.log('Response ok:', response.ok)
+      console.log('Final response status:', response.status)
+      console.log('Final response ok:', response.ok)
 
       if (!response.ok) {
         const errorText = await response.text()
+        console.error('HTTP Error Response:', errorText)
         throw new Error(`HTTP ${response.status}: ${errorText}`)
       }
 
@@ -207,6 +262,31 @@ export function StakeForm() {
           console.log('No data returned (normal for updates)')
         }
         
+        // Verify the stake was actually created by fetching it immediately
+        console.log('Verifying stake creation by fetching it...')
+        const verifyResponse = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/sherk_stakes?user_id=eq.${user.id}`, {
+          method: 'GET',
+          headers: {
+            'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${accessToken || import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+            'Content-Type': 'application/json'
+          }
+        })
+        
+        if (verifyResponse.ok) {
+          const verifyData = await verifyResponse.json()
+          console.log('Verification fetch result:', verifyData)
+          console.log('Verification fetch result length:', verifyData ? verifyData.length : 'null')
+          
+          if (verifyData && verifyData.length > 0) {
+            console.log('✅ Stake verification successful!')
+          } else {
+            console.log('❌ Stake verification failed - no data found')
+          }
+        } else {
+          console.error('Verification fetch failed:', verifyResponse.status, verifyResponse.statusText)
+        }
+        
         setModalMessage('🎉 Stake updated successfully! Redirecting to dashboard...')
         setModalType('success')
         setShowModal(true)
@@ -215,8 +295,12 @@ export function StakeForm() {
         localStorage.removeItem(`sherk_stake_${user.id}`)
         
         setTimeout(() => {
-          navigate('/dashboard')
-        }, 1500)
+          console.log('Redirecting to dashboard after successful submission')
+          navigate('/dashboard', { 
+            replace: true,
+            state: { fromStakeForm: true, timestamp: Date.now() }
+          })
+        }, 1000) // Reduced from 2000ms to 1000ms
         return
       } else {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`)
@@ -284,10 +368,10 @@ Error: ${error instanceof Error ? error.message : 'Unknown error'}`)
             className="text-center mb-12"
           >
             <h1 className="text-4xl font-heading font-bold text-white mb-4">
-              SHERK NFT Staking
+              {hasExistingStake ? 'Update SHERK NFT Stake' : 'SHERK NFT Staking'}
             </h1>
             <p className="text-xl text-gray-400">
-              Stake your SHERK NFTs and earn weekly rewards
+              {hasExistingStake ? 'Update your existing stake' : 'Stake your SHERK NFTs and earn weekly rewards'}
             </p>
           </motion.div>
 
@@ -304,28 +388,42 @@ Error: ${error instanceof Error ? error.message : 'Unknown error'}`)
                   <label className="block text-white font-medium mb-2">
                     <User className="inline h-4 w-4 mr-2" />
                     Nickname *
+                    {hasExistingStake && (
+                      <span className="text-sm text-gray-400 ml-2">(Cannot be changed)</span>
+                    )}
                   </label>
                   <input
                     type="text"
                     value={stakeData.nickname}
-                    onChange={(e) => handleInputChange('nickname', e.target.value)}
-                    className="w-full bg-dark-700 border border-gray-600 rounded-lg px-4 py-3 text-white focus:border-primary-500 focus:ring-1 focus:ring-primary-500"
-                    placeholder="Enter your nickname"
+                    onChange={(e) => !hasExistingStake && handleInputChange('nickname', e.target.value)}
+                    className={`w-full bg-dark-700 border border-gray-600 rounded-lg px-4 py-3 text-white focus:border-primary-500 focus:ring-1 focus:ring-primary-500 ${
+                      hasExistingStake ? 'opacity-60 cursor-not-allowed bg-gray-800' : ''
+                    }`}
+                    placeholder={hasExistingStake ? 'Nickname (locked)' : 'Enter your nickname'}
                     required
+                    readOnly={hasExistingStake}
+                    disabled={hasExistingStake}
                   />
                 </div>
                 <div>
                   <label className="block text-white font-medium mb-2">
                     <Wallet className="inline h-4 w-4 mr-2" />
                     Kaspa Wallet Address *
+                    {hasExistingStake && (
+                      <span className="text-sm text-gray-400 ml-2">(Cannot be changed)</span>
+                    )}
                   </label>
                   <input
                     type="text"
                     value={stakeData.wallet_address}
-                    onChange={(e) => handleInputChange('wallet_address', e.target.value)}
-                    className="w-full bg-dark-700 border border-gray-600 rounded-lg px-4 py-3 text-white focus:border-primary-500 focus:ring-1 focus:ring-primary-500"
-                    placeholder="Enter your Kaspa wallet address"
+                    onChange={(e) => !hasExistingStake && handleInputChange('wallet_address', e.target.value)}
+                    className={`w-full bg-dark-700 border border-gray-600 rounded-lg px-4 py-3 text-white focus:border-primary-500 focus:ring-1 focus:ring-primary-500 ${
+                      hasExistingStake ? 'opacity-60 cursor-not-allowed bg-gray-800' : ''
+                    }`}
+                    placeholder={hasExistingStake ? 'Wallet Address (locked)' : 'Enter your Kaspa wallet address'}
                     required
+                    readOnly={hasExistingStake}
+                    disabled={hasExistingStake}
                   />
                 </div>
               </div>
@@ -395,12 +493,12 @@ Error: ${error instanceof Error ? error.message : 'Unknown error'}`)
                     {isSubmitting ? (
                       <>
                         <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                        Creating...
+                        {hasExistingStake ? 'Updating...' : 'Creating...'}
                       </>
                     ) : (
                       <>
                         <Check className="h-4 w-4 mr-2" />
-                        Create Stake
+                        {hasExistingStake ? 'Update Stake' : 'Create Stake'}
                       </>
                     )}
                   </button>

@@ -17,6 +17,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [userProfile, setUserProfile] = useState<any | null>(null)
   const [loading, setLoading] = useState(true)
+  
+  // Add a timeout to prevent infinite loading
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      if (loading) {
+        console.log('AuthContext: Loading timeout - forcing loading to false')
+        setLoading(false)
+      }
+    }, 5000) // Reduced from 10000ms to 5000ms
+    
+    return () => clearTimeout(timeout)
+  }, [loading])
 
   useEffect(() => {
     console.log('AuthContext: Initializing authentication...')
@@ -41,6 +53,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log('AuthContext: Auth state change event:', event, 'user:', session?.user?.email)
+      // Only set loading to true for real transitions
+      if (['SIGNED_IN', 'SIGNED_OUT', 'TOKEN_REFRESHED'].includes(event)) {
+        setLoading(true)
+      }
       setUser(session?.user ?? null)
       if (session?.user) {
         console.log('AuthContext: User authenticated, fetching profile...')
